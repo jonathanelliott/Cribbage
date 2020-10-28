@@ -93,6 +93,11 @@ flushScore h
   | isFlush h && length h `elem` [4,5] = fromIntegral $ length h
   | otherwise = 0
 
+flushScore' :: Hand -> Points
+flushScore' h
+  | isFlush h && length h `elem` [4,5] = 4
+  | otherwise = 0
+
 nobs :: Hand -> Card -> Bool
 nobs h starter = (Card Jack s) `elem` h
   where s = suit starter
@@ -123,19 +128,19 @@ fullScore h s = let
   runPts = runScore h'
   runCards = maxRuns h'
   nobsPts = nobsScore h s
-  flushPts = if isFlush h' then flushScore h' else flushScore h
+  flushPts = if isFlush h' then flushScore' h' else flushScore' h
   -- in Score [pairPts, fifteenPts, runPts, nobsPts, flushPts] [pairCards, fifteenCards, runCards]
   in Score pairPts pairCards fifteenPts fifteenCards runPts runCards nobsPts flushPts
 
 instance Show Score where
   show score =
-    "Pairs: "    ++ (show $ pairCards score)    ++ " --> " ++ (show $ pairPts score) ++ "\n" ++
-    "Fifteens: " ++ (show $ fifteenCards score) ++ " --> " ++ (show $ fifteenPts score) ++ "\n" ++
-    "Runs: "     ++ (show $ runCards score)     ++ " --> " ++ (show $ runPts score) ++ "\n" ++
+    "Pairs: "    ++ (show $ pairCards score)    ++ " --> " ++ (show . floor $ pairPts score) ++ "\n" ++
+    "Fifteens: " ++ (show $ fifteenCards score) ++ " --> " ++ (show . floor $ fifteenPts score) ++ "\n" ++
+    "Runs: "     ++ (show $ runCards score)     ++ " --> " ++ (show . floor $ runPts score) ++ "\n" ++
     flushMessage ++ nobsMessage ++
-    "Total: " ++ (show $ scoreSum score)
+    "Total: " ++ (show . floor $ scoreSum score)
       where
-        flushMessage = if flushPts score > 0 then (show $ flushPts score) ++ " for a flush\n" else ""
+        flushMessage = if flushPts score > 0 then (show . floor $ flushPts score) ++ " for a flush\n" else ""
         nobsMessage = if nobsPts score  == 1 then "...and 1 for his nob\n" else ""
 
 scoreSum :: Score -> Points
@@ -158,24 +163,41 @@ snd' (w,x,y,z) = x
 
 avgScore :: Hand -> [Card] -> Crib -> Points
 avgScore h d c = s / l where
-  s = sum . map snd $ starterScores h d c
+  s = sum . map snd . getStarters $ starterScores h d c
   l = fromIntegral $ 52 - length h - length d
 
 minScore :: Hand -> [Card] -> Crib -> Points
-minScore h d c = snd . last $ starterScores h d c
+minScore h d c = snd . last . getStarters $ starterScores h d c
 
 maxScore :: Hand -> [Card] -> Crib -> Points
-maxScore h d c = snd . head $ starterScores h d c
+maxScore h d c = snd . head . getStarters $ starterScores h d c
 
-starterScores :: Hand -> [Card] -> Crib -> [(Card, Points)]
-starterScores h d c = reverse . sortOn snd . map starterWithScore $ reducedDeck where
+newtype StarterSummary = SSum { getStarters :: [(Card, Points)] }
+
+instance Show StarterSummary where
+  show (SSum ss) = unlines . map showStarter $ ss where
+    showStarter (s, pts) = (show s) ++ " --> " ++ (show $ floor pts)
+
+starterScores :: Hand -> [Card] -> Crib -> StarterSummary --[(Card, Points)]
+starterScores h d c = SSum $ reverse . sortOn snd . map starterWithScore $ reducedDeck where
   starterWithScore s = (s, combinedScore h d c s)
   reducedDeck = deck \\ (h ++ d)
 
-discardScores :: Hand -> Crib -> [([Card], Points, Points, Points)]
-discardScores h c = reverse . sortOn snd' . map discardWithScore $ discards where
+newtype DiscardSummary = DSum { getDiscards :: [([Card], Points, Points, Points)] }
+
+-- show :: DiscardSummary -> String
+instance Show DiscardSummary where
+  show (DSum ds) = unlines . map showDiscard $ ds where
+    showDiscard (d, avgPts, minPts, maxPts) = (show d) ++ " Average: " ++ (show avgPts)
+                                                       ++ ", Minimum: " ++ (show $ floor minPts)
+                                                       ++ ", Maximum: " ++ (show $ floor maxPts)
+discards :: Hand -> [[Card]]
+discards = filter ((==2) . length) . subsequences
+
+discardScores :: Hand -> Crib -> DiscardSummary--[([Card], Points, Points, Points)]
+discardScores h c = DSum $ reverse . sortOn snd' . map discardWithScore $ discards h where
   discardWithScore d = (d, avgScore (h \\ d) d c, minScore (h \\ d) d c, maxScore (h \\ d) d c)
-  discards = filter ((==2) . length) $ subsequences h
+  -- discards = filter ((==2) . length) $ subsequences h
 
 bestDiscard :: Hand -> Crib -> [Card]
-bestDiscard h c = fst' . head $ discardScores h c
+bestDiscard h c = fst' . head . getDiscards $ discardScores h c
